@@ -116,9 +116,9 @@ resource "azurerm_lb_backend_address_pool" "web_tier" {
 }
 
 resource "azurerm_lb_probe" "web_tier_lbp" {
-  name                = lower("lb-probe-port-80-${azurerm_linux_virtual_machine_scale_set.web_tier.name}")
+  name                = lower("lb-probe-port-22-${azurerm_linux_virtual_machine_scale_set.web_tier.name}")
   loadbalancer_id     = azurerm_lb.external.id
-  port                = 80
+  port                = 22
   protocol            = "Tcp"
   number_of_probes    = 1
 }
@@ -128,8 +128,8 @@ resource "azurerm_lb_rule" "ext_lbrule" {
   loadbalancer_id                = azurerm_lb.external.id
   probe_id                       = azurerm_lb_probe.web_tier_lbp.id
   protocol                       = "Tcp"
-  frontend_port                  = 80
-  backend_port                   = 80
+  frontend_port                  = 22
+  backend_port                   = 22
   frontend_ip_configuration_name = azurerm_lb.external.frontend_ip_configuration.0.name
   backend_address_pool_ids       = [azurerm_lb_backend_address_pool.web_tier.id]
 }
@@ -140,6 +140,8 @@ resource "azurerm_lb" "internal" {
   location            = data.azurerm_resource_group.guld.location
   resource_group_name = data.azurerm_resource_group.guld.name
 
+  sku                 = "Standard"
+
   frontend_ip_configuration {
     name                 = "PrivateIPAddress"
     subnet_id            = azurerm_subnet.business_tier.id
@@ -149,6 +151,11 @@ resource "azurerm_lb" "internal" {
   }
 
   tags = var.tags
+}
+
+resource "azurerm_lb_backend_address_pool" "business_tier" {
+  loadbalancer_id = azurerm_lb.internal.id
+  name            = "business_tier-001"
 }
 
 resource "azurerm_linux_virtual_machine_scale_set" "business_tier" {
@@ -184,12 +191,12 @@ resource "azurerm_linux_virtual_machine_scale_set" "business_tier" {
       name      = "ipconfig"
       primary   = true
       subnet_id = azurerm_subnet.business_tier.id
-      load_balancer_backend_address_pool_ids = [azurerm_lb_backend_address_pool.business_tier[count.index].id]
+      load_balancer_backend_address_pool_ids = [azurerm_lb_backend_address_pool.business_tier.id]
     }
   } 
 }
 
-resource "azurerm_private_dns_a_record" "example" {
+resource "azurerm_private_dns_a_record" "business_tier" {
   name                = "business-tier"
   zone_name           = azurerm_private_dns_zone.demo.name
   resource_group_name = data.azurerm_resource_group.guld.name
@@ -198,16 +205,8 @@ resource "azurerm_private_dns_a_record" "example" {
   records             = [azurerm_lb.internal.frontend_ip_configuration.0.private_ip_address]
 }
 
-resource "azurerm_lb_backend_address_pool" "business_tier" {
-  count = length(local.business_tier_probes)
-  loadbalancer_id = azurerm_lb.internal.id
-  name            = "business_tier-00${count.index}"
-}
-
-
 resource "azurerm_lb_probe" "business_tier_lbp" {
-  count               = length(local.business_tier_probes)
-  name                = lower(local.business_tier_probes[count.index])
+  name                = "business-tier-lbp-001"
   loadbalancer_id     = azurerm_lb.internal.id
   port                = 80
   protocol            = "Tcp"
@@ -215,18 +214,12 @@ resource "azurerm_lb_probe" "business_tier_lbp" {
 }
 
 resource "azurerm_lb_rule" "int_lbrule" {
-  count                          = length(local.business_tier_probes)
-  name                           = format("%s-%02d-rule", "business-tier-00${count.index + 1}", 1)
+  name                           = format("%s-%02d-rule", "business-tier", 1)
   loadbalancer_id                = azurerm_lb.internal.id
-  probe_id                       = azurerm_lb_probe.business_tier_lbp[count.index].id
+  probe_id                       = azurerm_lb_probe.business_tier_lbp.id
   protocol                       = "Tcp"
   frontend_port                  = 80
   backend_port                   = 80
   frontend_ip_configuration_name = azurerm_lb.internal.frontend_ip_configuration.0.name
-  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.business_tier[count.index].id]
-
-  depends_on = [
-    azurerm_lb_probe.business_tier_lbp,
-    azurerm_lb_backend_address_pool.business_tier
-  ]
+  backend_address_pool_ids       = [azurerm_lb_backend_address_pool.business_tier.id]
 }
